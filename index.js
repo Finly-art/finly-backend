@@ -92,30 +92,53 @@ app.post("/api/chat", async (req, res) => {
       usage = newUser;
     }
 
-    /* =========================
-       TRIAL LOGIC
-    ========================= */
+  /* =========================
+   TRIAL & PREMIUM LOGIC
+========================= */
 
-    const createdAt = new Date(usage.created_at);
-    const now = new Date();
+const createdAt = new Date(usage.created_at);
+const now = new Date();
+const diffTime = now - createdAt;
+const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-    const diffTime = now - createdAt;
-    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+// RESET DAILY COUNTER IF NEW DAY
+if (!usage.last_reset || new Date(usage.last_reset).toDateString() !== now.toDateString()) {
+  await supabase
+    .from("ai_usage")
+    .update({
+      used_today: 0,
+      last_reset: now
+    })
+    .eq("user_id", userId);
 
-    if (usage.subscription === "trial") {
-      if (diffDays > TRIAL_DAYS) {
-        return res.status(403).json({
-          reply: "Essai gratuit expiré. Passe en premium 🚀",
-        });
-      }
+  usage.used_today = 0;
+}
 
-      if (usage.used_total >= TRIAL_LIMIT) {
-        return res.status(403).json({
-          reply: "Tu as utilisé tes 10 messages gratuits 🚀",
-        });
-      }
-    }
+// ===== TRIAL =====
+if (usage.subscription === "trial") {
 
+  if (diffDays > TRIAL_DAYS) {
+    return res.status(403).json({
+      reply: "Essai gratuit expiré. Passe en premium 🚀",
+    });
+  }
+
+  if (usage.used_total >= TRIAL_LIMIT) {
+    return res.status(403).json({
+      reply: "Tu as utilisé tes 10 messages gratuits 🚀",
+    });
+  }
+}
+
+// ===== PREMIUM =====
+if (usage.subscription === "premium") {
+
+  if (usage.used_today >= 50) {
+    return res.status(403).json({
+      reply: "Limite de 50 messages atteinte aujourd'hui 💎",
+    });
+  }
+}
     /* =========================
        OPENAI CALL
     ========================= */
@@ -160,12 +183,12 @@ app.post("/api/chat", async (req, res) => {
     ========================= */
 
     await supabase
-      .from("ai_usage")
-      .update({
-        used_total: usage.used_total + 1,
-      })
-      .eq("user_id", userId);
-
+  .from("ai_usage")
+  .update({
+    used_total: usage.used_total + 1,
+    used_today: usage.used_today + 1,
+  })
+  .eq("user_id", userId);
     return res.json({ reply });
   } catch (err) {
     console.error(err);
