@@ -1,7 +1,33 @@
 import express from "express";
 import cors from "cors";
+import fetch from "node-fetch";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
+
+app.use(express.json({ limit: "1mb" }));
+app.use(cors());
+
+/* =========================
+   SUPABASE CONFIG
+========================= */
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+/* =========================
+   CONFIG
+========================= */
+
+const TRIAL_LIMIT = 10;
+const TRIAL_DAYS = 7;
+
+/* =========================
+   HELPERS
+========================= */
+
 function extractUserId(req) {
   const headerId = req.headers["x-device-id"];
   const bodyId = req.body?.deviceId || req.body?.userId;
@@ -10,19 +36,27 @@ function extractUserId(req) {
   if (!id || typeof id !== "string" || id.length < 6) return null;
   return id;
 }
-app.use(express.json({ limit: "1mb" }));
-app.use(cors());
+
+/* =========================
+   HEALTH CHECK
+========================= */
 
 app.get("/", (req, res) => {
   res.json({ status: "Finly backend running 🚀" });
 });
 
+/* =========================
+   CHAT ENDPOINT
+========================= */
+
 app.post("/api/chat", async (req, res) => {
   try {
     const userId = extractUserId(req);
-if (!userId) {
-  return res.status(400).json({ reply: "deviceId manquant (x-device-id)." });
-}    const apiKey = process.env.OPENAI_API_KEY;
+    if (!userId) {
+      return res.status(400).json({ reply: "deviceId manquant." });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ reply: "Missing API key." });
     }
@@ -30,45 +64,112 @@ if (!userId) {
     const { message } = req.body;
 
     if (!message || typeof message !== "string") {
-      return res.status(400).json({ reply: "Invalid message." });
+      return res.status(400).json({ reply: "Message invalide." });
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "You are a finance coach.",
-          },
-          {
-            role: "user",
-            content: message,
-          },
-        ],
-        max_tokens: 300,
-      }),
-    });
+    /* =========================
+       GET USER USAGE
+    ========================= */
+
+    let { data: usage } = await supabase
+      .from("ai_usage")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+
+    // Si utilisateur inexistant → on le crée
+    if (!usage) {
+      const { data: newUser } = await supabase
+        .from("ai_usage")
+        .insert({
+          user_id: userId,
+          used_total: 0,
+          subscription: "trial",
+        })
+        .select()
+        .single();
+
+      usage = newUser;
+    }
+
+    /* =========================
+       TRIAL LOGIC
+    ========================= */
+
+    const createdAt = new Date(usage.created_at);
+    const now = new Date();
+
+    const diffTime = now - createdAt;
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+    if (usage.subscription === "trial") {
+      if (diffDays > TRIAL_DAYS) {
+        return res.status(403).json({
+          reply: "Essai gratuit expiré. Passe en premium 🚀",
+        });
+      }
+
+      if (usage.used_total >= TRIAL_LIMIT) {
+        return res.status(403).json({
+          reply: "Tu as utilisé tes 10 messages gratuits 🚀",
+        });
+      }
+    }
+
+    /* =========================
+       OPENAI CALL
+    ========================= */
+
+    const response = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: "You are FINLY Coach, a professional finance coach.",
+            },
+            {
+              role: "user",
+              content: message,
+            },
+          ],
+          max_tokens: 400,
+        }),
+      }
+    );
 
     const data = await response.json();
 
     if (!response.ok) {
       console.error(data);
-      return res.status(500).json({ reply: "OpenAI error." });
+      return res.status(500).json({ reply: "Erreur OpenAI." });
     }
 
     const reply =
-      data?.choices?.[0]?.message?.content?.trim() || "No response.";
+      data?.choices?.[0]?.message?.content?.trim() || "Pas de réponse.";
+
+    /* =========================
+       INCREMENT USAGE
+    ========================= */
+
+    await supabase
+      .from("ai_usage")
+      .update({
+        used_total: usage.used_total + 1,
+      })
+      .eq("user_id", userId);
 
     return res.json({ reply });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ reply: "Server error." });
+    return res.status(500).json({ reply: "Erreur serveur." });
   }
 });
 
