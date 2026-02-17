@@ -68,31 +68,31 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ reply: "Message invalide." });
     }
 
-    /* =========================
-       GET USER USAGE
-    ========================= */
+   /* =========================
+   GET USER USAGE
+========================= */
 
-    let { data: usage } = await supabase
-      .from("ai_usage")
-      .select("*")
-      .eq("user_id", userId)
-      .single();
+let { data: usage } = await supabase
+  .from("ai_usage")
+  .select("*")
+  .eq("user_id", userId)
+  .maybeSingle();
 
-    // Si utilisateur inexistant → on le crée
-    if (!usage) {
-      const { data: newUser } = await supabase
-        .from("ai_usage")
-        .insert({
-          user_id: userId,
-          used_total: 0,
-          subscription: "trial",
-        })
-        .select()
-        .single();
+if (!usage) {
+  const { data: newUser } = await supabase
+    .from("ai_usage")
+    .insert({
+      user_id: userId,
+      used_total: 0,
+      used_today: 0,
+      subscription: "trial",
+      last_reset: new Date()
+    })
+    .select()
+    .single();
 
-      usage = newUser;
-    }
-
+  usage = newUser;
+}
   /* =========================
    TRIAL & PREMIUM LOGIC
 ========================= */
