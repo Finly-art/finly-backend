@@ -52,7 +52,8 @@ app.get("/", (req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const userId = extractUserId(req);
-    if (!userId) {
+         console.log("USER ID RECEIVED:", userId);    
+     if (!userId) {
       return res.status(400).json({ reply: "deviceId manquant." });
     }
 
