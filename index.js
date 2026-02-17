@@ -68,18 +68,18 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ reply: "Message invalide." });
     }
 
-   /* =========================
-   GET USER USAGE
-========================= */
+  // ===============================
+// GET USER USAGE
+// ===============================
 
-let { data: usage } = supabase
+let { data: usage } = await supabase
   .from("ai_usage")
   .select("*")
   .eq("user_id", userId)
   .maybeSingle();
 
 if (!usage) {
-  const { data: newUser } = await supabase
+  const { data: newUser, error } = await supabase
     .from("ai_usage")
     .insert({
       user_id: userId,
@@ -91,8 +91,18 @@ if (!usage) {
     .select()
     .single();
 
+  if (error) {
+    console.error("Insert error:", error);
+    return res.status(500).json({ reply: "DB insert error" });
+  }
+
   usage = newUser;
-}  /* =========================
+}
+
+// 🔥 ULTRA IMPORTANT
+if (!usage) {
+  return res.status(500).json({ reply: "Usage not found." });
+}}  /* =========================
    TRIAL & PREMIUM LOGIC
 ========================= */
 
