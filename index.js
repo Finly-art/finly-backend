@@ -155,78 +155,77 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    /* =========================
-       STREAMING OPENAI
-    ========================= */
+   /* =========================
+   STREAMING OPENAI
+========================= */
 
-    const openaiResponse = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
+const openaiResponse = await fetch(
+  "https://api.openai.com/v1/chat/completions",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      stream: true,
+      messages: [
+        {
+          role: "system",
+          content: "You are FINLY Coach, a professional finance coach."
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          stream: true,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are FINLY Coach, a professional finance coach."
-            },
-            {
-              role: "user",
-              content: message
-            }
-          ],
-          max_tokens: 400
-        })
-      }
-    );
-
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text();
-      console.error(errorText);
-      return res.status(500).json({ reply: "Erreur OpenAI." });
-    }
-
-    res.setHeader("Content-Type", "text/plain");
-    res.setHeader("Transfer-Encoding", "chunked");
-
-    const reader = openaiResponse.body.getReader();
-    const decoder = new TextDecoder();
-
-    let fullReply = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (line.startsWith("data: ") && line !== "data: [DONE]") {
-          const json = line.replace("data: ", "");
-
-          try {
-            const parsed = JSON.parse(json);
-            const content =
-              parsed.choices?.[0]?.delta?.content;
-
-            if (content) {
-              fullReply += content;
-              res.write(content);
-            }
-          } catch {}
+        {
+          role: "user",
+          content: message
         }
-      }
+      ],
+      max_tokens: 400
+    })
+  }
+);
+
+if (!openaiResponse.ok) {
+  const errorText = await openaiResponse.text();
+  console.error(errorText);
+  return res.status(500).json({ reply: "Erreur OpenAI." });
+}
+
+// IMPORTANT
+res.setHeader("Content-Type", "text/plain; charset=utf-8");
+res.setHeader("Cache-Control", "no-cache");
+res.setHeader("Connection", "keep-alive");
+
+res.flushHeaders();
+
+const reader = openaiResponse.body.getReader();
+const decoder = new TextDecoder();
+
+let fullReply = "";
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value, { stream: true });
+  const lines = chunk.split("\n");
+
+  for (const line of lines) {
+    if (line.startsWith("data: ") && line !== "data: [DONE]") {
+      try {
+        const json = JSON.parse(line.replace("data: ", ""));
+        const content = json.choices?.[0]?.delta?.content;
+
+        if (content) {
+          fullReply += content;
+          res.write(content);
+        }
+      } catch {}
     }
+  }
+}
 
-    res.end();
-
+res.end();
     /* =========================
        INCREMENT USAGE
     ========================= */
