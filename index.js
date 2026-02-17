@@ -102,7 +102,8 @@ if (!usage) {
 // 🔥 ULTRA IMPORTANT
 if (!usage) {
   return res.status(500).json({ reply: "Usage not found." });
-}}  /* =========================
+} 
+/* =========================
    TRIAL & PREMIUM LOGIC
 ========================= */
 
