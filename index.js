@@ -4,8 +4,25 @@ import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 
+/* =========================
+   MIDDLEWARE
+========================= */
+
 app.use(express.json({ limit: "1mb" }));
-app.use(cors());
+
+// 🔐 CORS sécurisé (mets ton vrai domaine en prod)
+app.use(
+  cors({
+    origin: "*",
+  })
+);
+// 🔐 Basic security headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
 
 /* =========================
    SUPABASE CONFIG
@@ -29,9 +46,13 @@ const PREMIUM_DAILY_LIMIT = 50;
 ========================= */
 
 async function verifyUser(req) {
-  const token = req.headers.authorization?.replace("Bearer ", "");
+  const authHeader = req.headers.authorization;
 
-  if (!token) return null;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.split(" ")[1];
 
   const { data, error } = await supabase.auth.getUser(token);
 
@@ -54,7 +75,6 @@ app.get("/", (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
-
     /* =========================
        AUTHENTICATION
     ========================= */
@@ -95,7 +115,7 @@ app.post("/api/chat", async (req, res) => {
           used_total: 0,
           used_today: 0,
           subscription: "trial",
-          last_reset: new Date()
+          last_reset: new Date(),
         })
         .select()
         .single();
@@ -109,7 +129,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const now = new Date();
-    const createdAt = new Date(usage.created_at || now);
+    const createdAt = new Date(usage.created_at);
 
     /* =========================
        RESET DAILY COUNTER
@@ -123,7 +143,7 @@ app.post("/api/chat", async (req, res) => {
         .from("ai_usage")
         .update({
           used_today: 0,
-          last_reset: now
+          last_reset: now,
         })
         .eq("user_id", userId);
 
@@ -140,13 +160,13 @@ app.post("/api/chat", async (req, res) => {
     if (usage.subscription === "trial") {
       if (diffDays > TRIAL_DAYS) {
         return res.status(403).json({
-          reply: "Essai gratuit expiré. Passe en premium 🚀"
+          reply: "Essai gratuit expiré. Passe en premium 🚀",
         });
       }
 
       if (usage.used_total >= TRIAL_LIMIT) {
         return res.status(403).json({
-          reply: "Tu as utilisé tes 10 messages gratuits 🚀"
+          reply: "Tu as utilisé tes 10 messages gratuits 🚀",
         });
       }
     }
@@ -158,7 +178,7 @@ app.post("/api/chat", async (req, res) => {
     if (usage.subscription === "premium") {
       if (usage.used_today >= PREMIUM_DAILY_LIMIT) {
         return res.status(403).json({
-          reply: "Limite de 50 messages atteinte aujourd'hui 💎"
+          reply: "Limite de 50 messages atteinte aujourd'hui 💎",
         });
       }
     }
@@ -173,7 +193,7 @@ app.post("/api/chat", async (req, res) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: "gpt-4o-mini",
@@ -182,15 +202,15 @@ app.post("/api/chat", async (req, res) => {
             {
               role: "system",
               content:
-                "You are FINLY Coach, a professional finance coach."
+                "You are FINLY Coach, a professional finance coach.",
             },
             {
               role: "user",
-              content: message
-            }
+              content: message,
+            },
           ],
-          max_tokens: 400
-        })
+          max_tokens: 400,
+        }),
       }
     );
 
@@ -208,8 +228,6 @@ app.post("/api/chat", async (req, res) => {
     const reader = openaiResponse.body.getReader();
     const decoder = new TextDecoder();
 
-    let fullReply = "";
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -225,7 +243,6 @@ app.post("/api/chat", async (req, res) => {
               json.choices?.[0]?.delta?.content;
 
             if (content) {
-              fullReply += content;
               res.write(content);
             }
           } catch {}
@@ -243,7 +260,7 @@ app.post("/api/chat", async (req, res) => {
       .from("ai_usage")
       .update({
         used_total: usage.used_total + 1,
-        used_today: usage.used_today + 1
+        used_today: usage.used_today + 1,
       })
       .eq("user_id", userId);
 
