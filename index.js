@@ -72,7 +72,7 @@ app.post("/api/chat", async (req, res) => {
    GET USER USAGE
 ========================= */
 
-const { data: usage } = await supabase
+let { data: usage } = supabase
   .from("ai_usage")
   .select("*")
   .eq("user_id", userId)
