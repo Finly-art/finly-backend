@@ -1,7 +1,55 @@
+import express from "express";
+import cors from "cors";
+import { createClient } from "@supabase/supabase-js";
+
+const app = express();
+
+app.use(express.json({ limit: "1mb" }));
+app.use(cors());
+
+/* =========================
+   SUPABASE CONFIG
+========================= */
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+/* =========================
+   CONFIG
+========================= */
+
+const TRIAL_LIMIT = 10;
+const TRIAL_DAYS = 7;
+const PREMIUM_DAILY_LIMIT = 50;
+
+/* =========================
+   HELPERS
+========================= */
+
+function extractUserId(req) {
+  const headerId = req.headers["x-device-id"];
+  const bodyId = req.body?.deviceId || req.body?.userId;
+  const id = headerId || bodyId;
+  if (!id || typeof id !== "string" || id.length < 6) return null;
+  return id;
+}
+
+/* =========================
+   HEALTH CHECK
+========================= */
+
+app.get("/", (req, res) => {
+  res.json({ status: "Finly backend running 🚀" });
+});
+
+/* =========================
+   CHAT ENDPOINT
+========================= */
+
 app.post("/api/chat", async (req, res) => {
   try {
-    console.time("TOTAL_REQUEST");
-
     const userId = extractUserId(req);
     if (!userId) {
       return res.status(400).json({ reply: "deviceId manquant." });
@@ -20,8 +68,6 @@ app.post("/api/chat", async (req, res) => {
     /* =========================
        GET USER USAGE
     ========================= */
-
-    console.time("SUPABASE");
 
     let { data: usage } = await supabase
       .from("ai_usage")
@@ -50,22 +96,17 @@ app.post("/api/chat", async (req, res) => {
       usage = newUser;
     }
 
-    console.timeEnd("SUPABASE");
-
     if (!usage) {
       return res.status(500).json({ reply: "Usage not found." });
     }
 
-    /* =========================
-       TRIAL & PREMIUM LOGIC
-    ========================= */
-
     const now = new Date();
     const createdAt = new Date(usage.created_at || now);
-    const diffDays =
-      (now - createdAt) / (1000 * 60 * 60 * 24);
 
-    // Reset daily
+    /* =========================
+       RESET DAILY COUNTER
+    ========================= */
+
     if (
       !usage.last_reset ||
       new Date(usage.last_reset).toDateString() !== now.toDateString()
@@ -81,7 +122,13 @@ app.post("/api/chat", async (req, res) => {
       usage.used_today = 0;
     }
 
-    // Trial
+    /* =========================
+       TRIAL LOGIC
+    ========================= */
+
+    const diffDays =
+      (now - createdAt) / (1000 * 60 * 60 * 24);
+
     if (usage.subscription === "trial") {
       if (diffDays > TRIAL_DAYS) {
         return res.status(403).json({
@@ -96,9 +143,12 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    // Premium
+    /* =========================
+       PREMIUM LOGIC
+    ========================= */
+
     if (usage.subscription === "premium") {
-      if (usage.used_today >= 50) {
+      if (usage.used_today >= PREMIUM_DAILY_LIMIT) {
         return res.status(403).json({
           reply: "Limite de 50 messages atteinte aujourd'hui 💎"
         });
@@ -108,8 +158,6 @@ app.post("/api/chat", async (req, res) => {
     /* =========================
        STREAMING OPENAI
     ========================= */
-
-    console.time("OPENAI");
 
     const openaiResponse = await fetch(
       "https://api.openai.com/v1/chat/completions",
@@ -172,20 +220,18 @@ app.post("/api/chat", async (req, res) => {
               fullReply += content;
               res.write(content);
             }
-          } catch (err) {}
+          } catch {}
         }
       }
     }
 
     res.end();
 
-    console.timeEnd("OPENAI");
-
     /* =========================
-       INCREMENT USAGE (ASYNC)
+       INCREMENT USAGE
     ========================= */
 
-    supabase
+    await supabase
       .from("ai_usage")
       .update({
         used_total: usage.used_total + 1,
@@ -193,9 +239,18 @@ app.post("/api/chat", async (req, res) => {
       })
       .eq("user_id", userId);
 
-    console.timeEnd("TOTAL_REQUEST");
   } catch (err) {
     console.error(err);
     return res.status(500).json({ reply: "Erreur serveur." });
   }
+});
+
+/* =========================
+   START SERVER
+========================= */
+
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, () => {
+  console.log("Finly backend running on port", PORT);
 });
