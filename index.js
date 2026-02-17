@@ -51,7 +51,8 @@ app.get("/", (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const userId = extractUserId(req);
+     console.time("TOTAL_REQUEST");   
+     const userId = extractUserId(req);
          console.log("USER ID RECEIVED:", userId);    
      if (!userId) {
       return res.status(400).json({ reply: "deviceId manquant." });
@@ -71,13 +72,13 @@ app.post("/api/chat", async (req, res) => {
   // ===============================
 // GET USER USAGE
 // ===============================
-
-let { data: usage } = await supabase
+console.time("SUPABASE");
+     let { data: usage } = await supabase
   .from("ai_usage")
   .select("*")
   .eq("user_id", userId)
   .maybeSingle();
-
+     console.timeEnd("SUPABASE");
 if (!usage) {
   const { data: newUser, error } = await supabase
     .from("ai_usage")
@@ -153,8 +154,8 @@ if (usage.subscription === "premium") {
     /* =========================
        OPENAI CALL
     ========================= */
-
-    const response = await fetch(
+console.time("OPENAI");
+     const response = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
         method: "POST",
@@ -180,7 +181,8 @@ if (usage.subscription === "premium") {
     );
 
     const data = await response.json();
-
+     console.timeEnd("OPENAI");
+console.timeEnd("TOTAL_REQUEST");
     if (!response.ok) {
       console.error(data);
       return res.status(500).json({ reply: "Erreur OpenAI." });
