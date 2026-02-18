@@ -25,11 +25,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // CORS sécurisé
-app.use(
-  cors({
-    origin: true,
-  })
-);
+app.use(cors());
 // 🔐 Basic security headers
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
