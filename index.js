@@ -11,10 +11,6 @@ const app = express();
 
 app.use(express.json({ limit: "1mb" }));
 
-// =========================
-// RATE LIMITING
-// =========================
-
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -24,9 +20,8 @@ const limiter = rateLimit({
 
 app.use(limiter);
 
-// CORS sécurisé
 app.use(cors());
-// 🔐 Basic security headers
+
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -90,7 +85,6 @@ app.post("/api/chat", async (req, res) => {
     ========================= */
 
     const user = await verifyUser(req);
-
     if (!user) {
       return res.status(401).json({ reply: "Non authentifié." });
     }
@@ -108,7 +102,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     /* =========================
-       GET USER USAGE
+       GET OR CREATE USAGE
     ========================= */
 
     let { data: usage } = await supabase
@@ -124,8 +118,8 @@ app.post("/api/chat", async (req, res) => {
           user_id: userId,
           used_total: 0,
           used_today: 0,
-          subscription: "trial",
           last_reset: new Date(),
+          created_at: new Date()
         })
         .select()
         .single();
@@ -139,7 +133,6 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const now = new Date();
-    const createdAt = new Date(usage.created_at);
 
     /* =========================
        RESET DAILY COUNTER
@@ -161,36 +154,20 @@ app.post("/api/chat", async (req, res) => {
     }
 
     /* =========================
-       TRIAL LOGIC
+       TRIAL LOGIC (SERVER SIDE)
     ========================= */
 
+    const createdAt = new Date(usage.created_at);
     const diffDays =
       (now - createdAt) / (1000 * 60 * 60 * 24);
 
-    if (usage.subscription === "trial") {
-      if (diffDays > TRIAL_DAYS) {
-        return res.status(403).json({
-          reply: "Essai gratuit expiré. Passe en premium 🚀",
-        });
-      }
+    const isTrialExpired = diffDays > TRIAL_DAYS;
+    const isTrialLimitReached = usage.used_total >= TRIAL_LIMIT;
 
-      if (usage.used_total >= TRIAL_LIMIT) {
-        return res.status(403).json({
-          reply: "Tu as utilisé tes 10 messages gratuits 🚀",
-        });
-      }
-    }
-
-    /* =========================
-       PREMIUM LOGIC
-    ========================= */
-
-    if (usage.subscription === "premium") {
-      if (usage.used_today >= PREMIUM_DAILY_LIMIT) {
-        return res.status(403).json({
-          reply: "Limite de 50 messages atteinte aujourd'hui 💎",
-        });
-      }
+    if (isTrialExpired || isTrialLimitReached) {
+      return res.status(403).json({
+        reply: "Essai gratuit terminé. Passe en premium 🚀",
+      });
     }
 
     /* =========================
