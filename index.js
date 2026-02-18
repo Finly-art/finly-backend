@@ -27,7 +27,7 @@ app.use(limiter);
 // CORS sécurisé
 app.use(
   cors({
-    origin: "*", // on améliorera après
+    origin: true,
   })
 );
 // 🔐 Basic security headers
