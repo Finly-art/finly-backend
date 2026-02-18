@@ -19,7 +19,6 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-
 app.use(cors());
 
 app.use((req, res, next) => {
@@ -58,7 +57,6 @@ async function verifyUser(req) {
   }
 
   const token = authHeader.split(" ")[1];
-
   const { data, error } = await supabase.auth.getUser(token);
 
   if (error || !data?.user) return null;
@@ -80,8 +78,9 @@ app.get("/", (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
+
     /* =========================
-       AUTHENTICATION
+       AUTH
     ========================= */
 
     const user = await verifyUser(req);
@@ -101,6 +100,38 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ reply: "Message invalide." });
     }
 
+    const now = new Date();
+
+    /* =========================
+       GET OR CREATE SUBSCRIPTION
+    ========================= */
+
+    let { data: subscription } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!subscription) {
+      const { data: newSub, error } = await supabase
+        .from("subscriptions")
+        .insert({
+          user_id: userId,
+          status: "trial",
+          trial_used: false,
+          created_at: now
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error(error);
+        return res.status(500).json({ reply: "Subscription creation error." });
+      }
+
+      subscription = newSub;
+    }
+
     /* =========================
        GET OR CREATE USAGE
     ========================= */
@@ -112,30 +143,28 @@ app.post("/api/chat", async (req, res) => {
       .maybeSingle();
 
     if (!usage) {
-      const { data: newUser, error } = await supabase
+      const { data: newUsage, error } = await supabase
         .from("ai_usage")
         .insert({
           user_id: userId,
           used_total: 0,
           used_today: 0,
-          last_reset: new Date(),
-          created_at: new Date()
+          last_reset: now,
+          created_at: now
         })
         .select()
         .single();
 
       if (error) {
         console.error(error);
-        return res.status(500).json({ reply: "DB insert error" });
+        return res.status(500).json({ reply: "Usage creation error" });
       }
 
-      usage = newUser;
+      usage = newUsage;
     }
 
-    const now = new Date();
-
     /* =========================
-       RESET DAILY COUNTER
+       RESET DAILY
     ========================= */
 
     if (
@@ -154,20 +183,51 @@ app.post("/api/chat", async (req, res) => {
     }
 
     /* =========================
-       TRIAL LOGIC (SERVER SIDE)
+       TRIAL CHECK
     ========================= */
 
-    const createdAt = new Date(usage.created_at);
-    const diffDays =
-      (now - createdAt) / (1000 * 60 * 60 * 24);
+    if (subscription.status === "trial") {
 
-    const isTrialExpired = diffDays > TRIAL_DAYS;
-    const isTrialLimitReached = usage.used_total >= TRIAL_LIMIT;
+      const createdAt = new Date(subscription.created_at);
+      const diffDays =
+        (now - createdAt) / (1000 * 60 * 60 * 24);
 
-    if (isTrialExpired || isTrialLimitReached) {
-      return res.status(403).json({
-        reply: "Essai gratuit terminé. Passe en premium 🚀",
-      });
+      if (diffDays > TRIAL_DAYS) {
+        return res.status(403).json({
+          reply: "Essai gratuit expiré. Passe en premium 🚀",
+        });
+      }
+
+      if (usage.used_total >= TRIAL_LIMIT) {
+        return res.status(403).json({
+          reply: "Tu as utilisé tes 10 messages gratuits 🚀",
+        });
+      }
+    }
+
+    /* =========================
+       PREMIUM CHECK
+    ========================= */
+
+    if (subscription.status === "premium") {
+
+      if (!subscription.current_period_end) {
+        return res.status(403).json({
+          reply: "Abonnement invalide.",
+        });
+      }
+
+      if (new Date(subscription.current_period_end) < now) {
+        return res.status(403).json({
+          reply: "Abonnement expiré 💎",
+        });
+      }
+
+      if (usage.used_today >= PREMIUM_DAILY_LIMIT) {
+        return res.status(403).json({
+          reply: "Limite quotidienne atteinte 💎",
+        });
+      }
     }
 
     /* =========================
@@ -186,15 +246,8 @@ app.post("/api/chat", async (req, res) => {
           model: "gpt-4o-mini",
           stream: true,
           messages: [
-            {
-              role: "system",
-              content:
-                "You are FINLY Coach, a professional finance coach.",
-            },
-            {
-              role: "user",
-              content: message,
-            },
+            { role: "system", content: "You are FINLY Coach, a professional finance coach." },
+            { role: "user", content: message },
           ],
           max_tokens: 400,
         }),
@@ -226,12 +279,8 @@ app.post("/api/chat", async (req, res) => {
         if (line.startsWith("data: ") && line !== "data: [DONE]") {
           try {
             const json = JSON.parse(line.replace("data: ", ""));
-            const content =
-              json.choices?.[0]?.delta?.content;
-
-            if (content) {
-              res.write(content);
-            }
+            const content = json.choices?.[0]?.delta?.content;
+            if (content) res.write(content);
           } catch {}
         }
       }
