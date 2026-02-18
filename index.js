@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -10,10 +11,23 @@ const app = express();
 
 app.use(express.json({ limit: "1mb" }));
 
-// 🔐 CORS sécurisé (mets ton vrai domaine en prod)
+// =========================
+// RATE LIMITING
+// =========================
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(limiter);
+
+// CORS sécurisé
 app.use(
   cors({
-    origin: "*",
+    origin: "*", // on améliorera après
   })
 );
 // 🔐 Basic security headers
